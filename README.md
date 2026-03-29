@@ -79,7 +79,7 @@ setupRouterScroller(router, {
           }
         });
 
-        // just in case, set a 500ms timer if the images loading time is too long
+        // If the images fail to load within 500ms, forcibly resolve the Promise to stop waiting
         timeout = setTimeout(() => {
           cleanup();
           resolve(undefined);
