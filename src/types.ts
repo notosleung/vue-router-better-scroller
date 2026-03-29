@@ -1,4 +1,7 @@
-import type { RouteLocationNormalized, RouteLocationNormalizedLoaded } from 'vue-router'
+import type {
+  RouteLocationNormalized,
+  RouteLocationNormalizedLoaded,
+} from 'vue-router'
 
 export type Awaitable<T> = T | Promise<T>
 
@@ -15,7 +18,10 @@ export interface ScrollPositionCoordinates {
 
 export type NavigationType = 'push' | 'history'
 
-export type ScrollPositionCoordinatesGroup = Record<string, ScrollPositionCoordinates>
+export type ScrollPositionCoordinatesGroup = Record<
+  string,
+  ScrollPositionCoordinates
+>
 
 export interface RouterScrollHandlerContext {
   to: RouteLocationNormalized
@@ -27,7 +33,9 @@ export interface RouterScrollHandlerContext {
 }
 
 export interface RouterScrollHandler {
-  (context: RouterScrollHandlerContext): Awaitable<ScrollPositionCoordinates | boolean | void>
+  (
+    context: RouterScrollHandlerContext,
+  ): Awaitable<ScrollPositionCoordinates | boolean | void>
 }
 
 export interface RouterScrollBehaviorOptions {
@@ -36,4 +44,10 @@ export interface RouterScrollBehaviorOptions {
    * Default scroll behavior applied, when not specified in the handler
    */
   behavior?: ScrollOptions['behavior']
+
+  /**
+   * How often to check and store scroll positions, in milliseconds. Very low values
+   * can cause performance issues. Default is 200
+   */
+  storeInterval?: number
 }

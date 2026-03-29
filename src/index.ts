@@ -1,33 +1,66 @@
 import type { Plugin } from 'vue'
+import type {
+  RouteLocationNormalized,
+  RouteLocationNormalizedLoaded,
+  Router,
+} from 'vue-router'
 import { nextTick } from 'vue'
 import { isNavigationFailure } from 'vue-router'
-import type { RouteLocationNormalized, RouteLocationNormalizedLoaded, Router } from 'vue-router'
-import type { NavigationType, RouterScrollBehaviorOptions, ScrollPositionCoordinates, ScrollPositionCoordinatesGroup } from './types'
+import type {
+  NavigationType,
+  RouterScrollBehaviorOptions,
+  ScrollPositionCoordinates,
+  ScrollPositionCoordinatesGroup,
+} from './types'
 
 const STATE_KEY = 'vueRouterScroller'
+const DEFAULT_INTERVAL = 200
 
 /**
  * Setup router scroll behavior directly with a router instance.
  */
-export function setupRouterScroller(router: Router, options: RouterScrollBehaviorOptions) {
-  if (router.options.scrollBehavior)
-    console.warn('`scrollBehavior` options in Vue Router is overwritten by `vue-router-scroller` plugin, you can remove it from createRouter()')
+export function setupRouterScroller(
+  router: Router,
+  options: RouterScrollBehaviorOptions,
+) {
+  if (router.options.scrollBehavior) {
+    console.warn(
+      '`scrollBehavior` options in Vue Router is overwritten by `vue-router-scroller` plugin, you can remove it from createRouter()',
+    )
+  }
 
   router.options.scrollBehavior = () => {}
+  options.storeInterval = options.storeInterval ?? DEFAULT_INTERVAL
 
   const positionsMap = new Map<string, ScrollPositionCoordinatesGroup>()
+  let saveTimerId: number | null = null
 
-  // `beforeLeave` but after all other hooks
-  router.beforeResolve((to, from) => {
-    // `beforeResolve` is also called when going back in history, we ignores it
-    if (history.state?.current === to.fullPath)
+  function startTimer(scrollKey: string) {
+    if (saveTimerId !== null)
       return
 
-    const pos = capturePositions(options)
-    const key = getScrollKey(from.fullPath)
-    positionsMap.set(key, pos)
-    history.replaceState({ ...history.state, [STATE_KEY]: pos }, '')
-  })
+    // Periodically save scroll positions
+    saveTimerId = window.setInterval(() => {
+      const pos = capturePositions(options)
+      positionsMap.set(scrollKey, pos)
+      history.replaceState({ ...history.state, [STATE_KEY]: pos }, '')
+    }, options.storeInterval)
+  }
+
+  function stopTimer() {
+    if (saveTimerId === null)
+      return
+
+    clearInterval(saveTimerId)
+    saveTimerId = null
+  }
+
+  // Stop saving scroll positions while the state is being manipulated by
+  // the browser/vue-router. Note that we can't listen to `popstate` because
+  // vue-router also listens to it, and its listener is setup first. Listening
+  // to `popstate` here would actually handle the event after all the callbacks
+  // which is too late
+  router.beforeEach(() => stopTimer())
 
   router.afterEach((to, from, failure) => {
     if (isNavigationFailure(failure))
@@ -39,6 +72,9 @@ export function setupRouterScroller(router: Router, options: RouterScrollBehavio
 
     nextTick(() => {
       applyPositions(to, from, pos, type, options)
+
+      // Safe to start storing again
+      startTimer(key)
     })
   })
 }
@@ -60,12 +96,17 @@ export function setupRouterScroller(router: Router, options: RouterScrollBehavio
  * app.mount('#app')
  * ```
  */
-export function createRouterScroller(options: RouterScrollBehaviorOptions): Plugin {
+export function createRouterScroller(
+  options: RouterScrollBehaviorOptions,
+): Plugin {
   return {
     install(app) {
       const router = app.config.globalProperties.$router
-      if (!router)
-        throw new Error('Router instance is not found on this Vue app. This plugin should be installed after Vue Router.')
+      if (!router) {
+        throw new Error(
+          'Router instance is not found on this Vue app. This plugin should be installed after Vue Router.',
+        )
+      }
       setupRouterScroller(router, options)
     },
   }
@@ -100,8 +141,7 @@ function querySelector(name: string) {
 function getScrollPosition(el: Element | Window): ScrollPositionCoordinates {
   if (el instanceof Window)
     return { left: window.scrollX, top: window.scrollY }
-  else
-    return { left: el.scrollLeft, top: el.scrollTop }
+  else return { left: el.scrollLeft, top: el.scrollTop }
 }
 
 async function applyPositions(
@@ -140,7 +180,7 @@ async function applyPositions(
 
     element.scrollTo({
       behavior: options.behavior,
-      ...position || { top: 0, left: 0 },
+      ...(position || { top: 0, left: 0 }),
     })
   }
 }
