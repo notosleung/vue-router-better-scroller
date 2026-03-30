@@ -1,17 +1,8 @@
 import type { Plugin } from 'vue'
-import type {
-  RouteLocationNormalized,
-  RouteLocationNormalizedLoaded,
-  Router,
-} from 'vue-router'
+import type { RouteLocationNormalized, RouteLocationNormalizedLoaded, Router } from 'vue-router'
 import { nextTick } from 'vue'
 import { isNavigationFailure } from 'vue-router'
-import type {
-  NavigationType,
-  RouterScrollBehaviorOptions,
-  ScrollPositionCoordinates,
-  ScrollPositionCoordinatesGroup,
-} from './types'
+import type { NavigationType, RouterScrollBehaviorOptions, ScrollPositionCoordinates, ScrollPositionCoordinatesGroup } from './types'
 
 const STATE_KEY = 'vueRouterScroller'
 const DEFAULT_INTERVAL = 200
@@ -33,48 +24,117 @@ export function setupRouterScroller(
   options.storeInterval = options.storeInterval ?? DEFAULT_INTERVAL
 
   const positionsMap = new Map<string, ScrollPositionCoordinatesGroup>()
-  let saveTimerId: number | null = null
+  let activeScrollKey: string | null = null
+  let scrollRafId: number | null = null
+  let lastSavedAt = 0
+  let lastHistoryPosition = typeof history.state?.position === 'number' ? history.state.position : 0
+  const lastSavedSignatureByKey = new Map<string, string>()
 
-  function startTimer(scrollKey: string) {
-    if (saveTimerId !== null)
+  function onHashAnchorClick(event: MouseEvent) {
+    if (event.defaultPrevented)
+      return
+    if (event.button !== 0)
+      return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
       return
 
-    // Periodically save scroll positions
-    saveTimerId = window.setInterval(() => {
-      const pos = capturePositions(options)
-      positionsMap.set(scrollKey, pos)
-      history.replaceState({ ...history.state, [STATE_KEY]: pos }, '')
-    }, options.storeInterval)
-  }
-
-  function stopTimer() {
-    if (saveTimerId === null)
+    const target = event.target as Element | null
+    const anchor = target?.closest('a[href^="#"]') as HTMLAnchorElement | null
+    if (!anchor)
       return
 
-    clearInterval(saveTimerId)
-    saveTimerId = null
+    const href = anchor.getAttribute('href')
+    if (!href || href.length <= 1)
+      return
+
+    // Use replaceState for in-page anchors so hash changes don't create extra history entries.
+    event.preventDefault()
+
+    const hash = href
+    history.replaceState(history.state, '', `${window.location.pathname}${window.location.search}${hash}`)
+
+    const id = decodeURIComponent(hash.slice(1))
+    const el = document.getElementById(id)
+    if (el)
+      el.scrollIntoView()
   }
+
+  function savePositionsIfChanged(scrollKey: string) {
+    const pos = capturePositions(options)
+    const signature = JSON.stringify(pos)
+
+    if (lastSavedSignatureByKey.get(scrollKey) === signature)
+      return
+
+    lastSavedSignatureByKey.set(scrollKey, signature)
+    positionsMap.set(scrollKey, pos)
+    history.replaceState({ ...history.state, [STATE_KEY]: pos }, '')
+  }
+
+  function onScroll() {
+    if (!activeScrollKey)
+      return
+
+    const scrollKey = activeScrollKey
+
+    if (scrollRafId !== null)
+      return
+
+    scrollRafId = window.requestAnimationFrame(() => {
+      scrollRafId = null
+      const now = performance.now()
+      if (now - lastSavedAt < options.storeInterval!)
+        return
+
+      lastSavedAt = now
+      savePositionsIfChanged(scrollKey)
+    })
+  }
+
+  function startTracking(scrollKey: string) {
+    activeScrollKey = scrollKey
+    savePositionsIfChanged(scrollKey)
+  }
+
+  function stopTracking() {
+    activeScrollKey = null
+    if (scrollRafId !== null) {
+      window.cancelAnimationFrame(scrollRafId)
+      scrollRafId = null
+    }
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true })
+  document.addEventListener('click', onHashAnchorClick, true)
 
   // Stop saving scroll positions while the state is being manipulated by
   // the browser/vue-router. Note that we can't listen to `popstate` because
   // vue-router also listens to it, and its listener is setup first. Listening
   // to `popstate` here would actually handle the event after all the callbacks
   // which is too late
-  router.beforeEach(() => stopTimer())
+  router.beforeEach(() => stopTracking())
 
   router.afterEach((to, from, failure) => {
     if (isNavigationFailure(failure))
       return
 
+    const currentHistoryPosition = typeof history.state?.position === 'number'
+      ? history.state.position
+      : lastHistoryPosition
+    const delta = currentHistoryPosition - lastHistoryPosition
+    const type: NavigationType = delta === 1 ? 'push' : 'history'
+    lastHistoryPosition = currentHistoryPosition
+
     const key = getScrollKey(to.fullPath)
-    const pos = history.state[STATE_KEY] || positionsMap.get(key)
-    const type = history.state[STATE_KEY] ? 'history' : 'push'
+    const pos = type === 'history'
+      ? (history.state[STATE_KEY] || positionsMap.get(key))
+      : undefined
 
     nextTick(() => {
       applyPositions(to, from, pos, type, options)
 
       // Safe to start storing again
-      startTimer(key)
+      startTracking(key)
     })
   })
 }
