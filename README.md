@@ -64,6 +64,7 @@ setupRouterScroller(router, {
 
         const onImageLoad = () => {
           loaded++;
+          // When all the images load successfully, resolve the Promise
           if (loaded === relevantImages.length) {
             cleanup();
             resolve(undefined);
@@ -94,7 +95,7 @@ setupRouterScroller(router, {
 ```
 
 > [!NOTE]
-> This repository is only for storing this update and the usage of my project, and I may delete it when antfu merge Kangaroux's PR
+> This repository is only for storing this update and the usage of my project
 
 ## License
 
